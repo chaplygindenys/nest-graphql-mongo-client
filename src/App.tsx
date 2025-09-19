@@ -1,4 +1,5 @@
-import { ApolloProvider, gql, useMutation, useQuery } from '@apollo/client';
+import { gql, useMutation, useQuery } from '@apollo/client';
+import { ApolloProvider } from '@apollo/client/react';
 import { useState } from 'react';
 import { client } from './apollo';
 
@@ -23,11 +24,11 @@ const CREATE = gql`
 
 function Tasks() {
   const { data, loading, error, refetch } = useQuery(TASKS);
-  const [createTask, { loading: creating }] = useMutation(CREATE);
+  const [createTask, m] = useMutation(CREATE);
   const [title, setTitle] = useState('');
 
   if (loading) return <p>Loading…</p>;
-  if (error) return <p style={{ color: 'red' }}>Error: {error.message}</p>;
+  if (error) return <pre style={{ color: 'red' }}>Query error: {error.message}</pre>;
 
   return (
     <div style={{ maxWidth: 560, margin: '40px auto', fontFamily: 'system-ui' }}>
@@ -40,14 +41,14 @@ function Tasks() {
           style={{ flex: 1, padding: 8 }}
         />
         <button
-          disabled={!title || creating}
+          disabled={!title || m.loading}
           onClick={async () => {
             await createTask({ variables: { t: title } });
             setTitle('');
             refetch();
           }}
         >
-          {creating ? 'Creating…' : 'Add'}
+          {m.loading ? 'Creating…' : 'Add'}
         </button>
       </div>
       <ul>
