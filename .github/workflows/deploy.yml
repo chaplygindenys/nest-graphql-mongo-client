@@ -16,6 +16,7 @@ jobs:
       - run: npm ci
       - run: |
           echo "VITE_API_URL=${{ secrets.VITE_API_URL }}" >> .env
+          echo "VITE_WS_URL=${{ secrets.VITE_WS_URL }}" >> .env
       - run: npm run build
       - run: cp dist/index.html dist/404.html   # <-- add this for SPA fallback
       - uses: actions/upload-pages-artifact@v3
