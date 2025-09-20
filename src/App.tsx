@@ -1,4 +1,12 @@
-import { ApolloProvider, gql, useMutation, useQuery, useSubscription } from '@apollo/client';
+import {
+  ApolloProvider,
+  gql,
+  useMutation,
+  useQuery,
+  useSubscription,
+  type Reference,
+} from '@apollo/client';
+
 import { useState } from 'react';
 import { client } from './apollo';
 import type { TaskGQL } from './types';
@@ -77,8 +85,11 @@ type DeleteTaskVars = { id: string };
 function Tasks() {
   const { data, loading, error } = useQuery<TasksQuery, TasksVars>(TASKS);
 
+  // helper
+  const asArray = (v: Reference | ReadonlyArray<Reference> | undefined) =>
+    (Array.isArray(v) ? v : v ? [v] : []) as ReadonlyArray<Reference>;
+
   const [createTask, mCreate] = useMutation<CreateTaskData, CreateTaskVars>(CREATE, {
-    // Optimistic add for snappy UX
     optimisticResponse: (vars) => ({
       createTask: {
         __typename: 'Task',
@@ -90,11 +101,22 @@ function Tasks() {
     update(cache, { data }) {
       const created = data?.createTask;
       if (!created) return;
+
       cache.modify({
         fields: {
-          tasks(existing: any[] = [], { readField }) {
-            const exists = existing.some((ref) => readField('id', ref) === created.id);
-            return exists ? existing : [created, ...existing];
+          tasks(
+            existingIn: Reference | ReadonlyArray<Reference> | undefined,
+            { readField, toReference },
+          ): ReadonlyArray<Reference> {
+            const existing = asArray(existingIn);
+
+            const newRef = toReference({ __typename: 'Task', id: created.id }) as
+              | Reference
+              | undefined;
+            if (!newRef) return existing;
+            if (existing.some((r) => readField('id', r) === created.id)) return existing;
+
+            return [newRef, ...existing];
           },
         },
       });
@@ -105,15 +127,17 @@ function Tasks() {
     update(cache, { data }) {
       const deleted = data?.deleteTask;
       if (!deleted) return;
-      // Remove from the list
       cache.modify({
         fields: {
-          tasks(existingRefs: any[], { readField }) {
-            return existingRefs.filter((ref) => readField('id', ref) !== deleted.id);
+          tasks(
+            existingIn: Reference | ReadonlyArray<Reference> | undefined,
+            { readField },
+          ): ReadonlyArray<Reference> {
+            const existing = asArray(existingIn);
+            return existing.filter((r) => readField('id', r) !== deleted.id);
           },
         },
       });
-      // Remove any cached queries for this item
       cache.evict({ id: cache.identify(deleted) });
       cache.gc();
     },
@@ -124,11 +148,18 @@ function Tasks() {
     onData: ({ client, data }) => {
       const t = data.data?.taskAdded;
       if (!t) return;
+
       client.cache.modify({
         fields: {
-          tasks(existing: any[] = [], { readField }) {
-            const exists = existing.some((ref) => readField('id', ref) === t.id);
-            return exists ? existing : [t, ...existing];
+          tasks(
+            existingIn: Reference | ReadonlyArray<Reference> | undefined,
+            { readField, toReference },
+          ): ReadonlyArray<Reference> {
+            const existing = asArray(existingIn);
+            const ref = toReference({ __typename: 'Task', id: t.id }) as Reference | undefined;
+            if (!ref) return existing;
+            if (existing.some((r) => readField('id', r) === t.id)) return existing;
+            return [ref, ...existing];
           },
         },
       });
@@ -139,12 +170,17 @@ function Tasks() {
     onData: ({ client, data }) => {
       const t = data.data?.taskUpdated;
       if (!t) return;
-      client.cache.modify({
-        fields: {
-          tasks(existing: any[] = [], { readField }) {
-            return existing.map((ref) => (readField('id', ref) === t.id ? t : ref));
-          },
-        },
+
+      client.cache.writeFragment({
+        id: client.cache.identify({ __typename: 'Task', id: t.id }),
+        fragment: gql`
+          fragment TaskUpdatedFields on Task {
+            id
+            title
+            completed
+          }
+        `,
+        data: t,
       });
     },
   });
@@ -153,10 +189,15 @@ function Tasks() {
     onData: ({ client, data }) => {
       const t = data.data?.taskDeleted;
       if (!t) return;
+
       client.cache.modify({
         fields: {
-          tasks(existing: any[] = [], { readField }) {
-            return existing.filter((ref) => readField('id', ref) !== t.id);
+          tasks(
+            existingIn: Reference | ReadonlyArray<Reference> | undefined,
+            { readField },
+          ): ReadonlyArray<Reference> {
+            const existing = asArray(existingIn);
+            return existing.filter((r) => readField('id', r) !== t.id);
           },
         },
       });
@@ -164,6 +205,7 @@ function Tasks() {
       client.cache.gc();
     },
   });
+
   // ------------------------------------------
 
   const [title, setTitle] = useState('');
