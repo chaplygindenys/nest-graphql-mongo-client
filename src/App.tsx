@@ -33,6 +33,17 @@ const CREATE = gql`
   }
 `;
 
+const UPDATE = gql`
+  mutation UpdateTask($id: ID!, $title: String, $completed: Boolean) {
+    updateTask(input: { id: $id, title: $title, completed: $completed }) {
+      id
+      title
+      completed
+      __typename
+    }
+  }
+`;
+
 const DELETE = gql`
   mutation DeleteTask($id: ID!) {
     deleteTask(id: $id) {
@@ -62,6 +73,7 @@ const TASK_UPDATED = gql`
     }
   }
 `;
+
 const TASK_DELETED = gql`
   subscription {
     taskDeleted {
@@ -78,6 +90,9 @@ type TasksVars = {};
 // Mutation types
 type CreateTaskData = { createTask: TaskGQL };
 type CreateTaskVars = { t: string };
+
+type UpdateTaskData = { updateTask: TaskGQL };
+type UpdateTaskVars = { id: string; title?: string | null; completed?: boolean | null };
 
 type DeleteTaskData = { deleteTask: Pick<TaskGQL, 'id' | '__typename'> };
 type DeleteTaskVars = { id: string };
@@ -122,6 +137,68 @@ function Tasks() {
       });
     },
   });
+
+  const [updateTask, mUpdate] = useMutation<UpdateTaskData, UpdateTaskVars>(UPDATE, {
+    // optimistic: reflect exactly what you’re changing
+    optimisticResponse: (vars) => ({
+      updateTask: {
+        __typename: 'Task',
+        id: vars.id,
+        title:
+          vars.title ??
+          client.readFragment<{ title: string }>({
+            id: client.cache.identify({ __typename: 'Task', id: vars.id }),
+            fragment: gql`
+              fragment T on Task {
+                title
+              }
+            `,
+          })?.title ??
+          '',
+        completed:
+          vars.completed ??
+          client.readFragment<{ completed: boolean }>({
+            id: client.cache.identify({ __typename: 'Task', id: vars.id }),
+            fragment: gql`
+              fragment T on Task {
+                completed
+              }
+            `,
+          })?.completed ??
+          false,
+      },
+    }),
+
+    // optional: not strictly needed, Apollo merges mutation result automatically
+    update(cache, { data }) {
+      const t = data?.updateTask;
+      if (!t) return;
+      cache.writeFragment({
+        id: cache.identify({ __typename: 'Task', id: t.id }),
+        fragment: gql`
+          fragment UpdatedTask on Task {
+            id
+            title
+            completed
+          }
+        `,
+        data: t,
+      });
+    },
+  });
+
+  /**
+  const [updateTask, mUpdate] = useMutation(UPDATE, {
+    optimisticResponse: (vars) => ({
+      updateTask: {
+        __typename: 'Task',
+        id: vars.id, // <-- keep the same id
+        title: vars.title ?? undefined, // or read from cache if needed
+        completed: vars.completed ?? undefined,
+      },
+    }),
+  });
+  */
 
   const [delTask, mDelete] = useMutation<DeleteTaskData, DeleteTaskVars>(DELETE, {
     update(cache, { data }) {
@@ -254,6 +331,35 @@ function Tasks() {
               title="Delete"
             >
               ×
+            </button>
+
+            <button
+              aria-label="Toggle complete"
+              onClick={() =>
+                updateTask({
+                  variables: { id: t.id, completed: !t.completed }, // <-- pass id!
+                }).catch((e) => console.error('updateTask error:', e))
+              }
+              disabled={mUpdate.loading}
+              title="Toggle complete"
+            >
+              {t.completed ? '❌' : '✅'}
+            </button>
+
+            <button
+              aria-label="Rename"
+              onClick={() => {
+                const newTitle = prompt('New title', t.title);
+                if (newTitle && newTitle !== t.title) {
+                  updateTask({
+                    variables: { id: t.id, title: newTitle },
+                  }).catch((e) => console.error('updateTask (title) error:', e));
+                }
+              }}
+              disabled={mUpdate.loading}
+              title="Rename"
+            >
+              ✏️
             </button>
           </li>
         ))}
