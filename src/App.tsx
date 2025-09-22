@@ -97,15 +97,21 @@ type UpdateTaskVars = { id: string; title?: string | null; completed?: boolean |
 type DeleteTaskData = { deleteTask: Pick<TaskGQL, 'id' | '__typename'> };
 type DeleteTaskVars = { id: string };
 
+
 function Tasks() {
+  // Fetches the list of tasks from the server using Apollo useQuery hook
   const { data, loading, error } = useQuery<TasksQuery, TasksVars>(TASKS);
 
-  // helper
+  // Helper to ensure the value is always an array of Reference
   const asArray = (v: Reference | ReadonlyArray<Reference> | undefined) =>
     (Array.isArray(v) ? v : v ? [v] : []) as ReadonlyArray<Reference>;
 
+  // useMutation for creating a new task
+  // - optimisticResponse: immediately adds a temporary task to the UI for responsiveness
+  // - update: after server responds, updates Apollo cache to include the new task
   const [createTask, mCreate] = useMutation<CreateTaskData, CreateTaskVars>(CREATE, {
     optimisticResponse: (vars) => ({
+      // This temporary response is shown in the UI before the server responds
       createTask: {
         __typename: 'Task',
         id: `temp:${crypto.randomUUID()}`,
@@ -114,9 +120,11 @@ function Tasks() {
       },
     }),
     update(cache, { data }) {
+      // This callback is called after the mutation completes
       const created = data?.createTask;
       if (!created) return;
 
+      // Add the new task to the Apollo cache so the UI updates
       cache.modify({
         fields: {
           tasks(
@@ -124,13 +132,12 @@ function Tasks() {
             { readField, toReference },
           ): ReadonlyArray<Reference> {
             const existing = asArray(existingIn);
-
-            const newRef = toReference({ __typename: 'Task', id: created.id }) as
-              | Reference
-              | undefined;
+            // Create a reference to the new task
+            const newRef = toReference({ __typename: 'Task', id: created.id }) as Reference | undefined;
             if (!newRef) return existing;
+            // Avoid duplicates
             if (existing.some((r) => readField('id', r) === created.id)) return existing;
-
+            // Add new task to the beginning of the list
             return [newRef, ...existing];
           },
         },
@@ -138,12 +145,16 @@ function Tasks() {
     },
   });
 
+  // useMutation for updating a task
+  // - optimisticResponse: immediately updates the task in the UI for responsiveness
+  // - update: after server responds, updates Apollo cache with the new task data
   const [updateTask, mUpdate] = useMutation<UpdateTaskData, UpdateTaskVars>(UPDATE, {
-    // optimistic: reflect exactly what you’re changing
+    // optimisticResponse: reflect exactly what you’re changing for instant UI feedback
     optimisticResponse: (vars) => ({
       updateTask: {
         __typename: 'Task',
         id: vars.id,
+        // Use the new title if provided, otherwise read from cache
         title:
           vars.title ??
           client.readFragment<{ title: string }>({
@@ -155,6 +166,7 @@ function Tasks() {
             `,
           })?.title ??
           '',
+        // Use the new completed value if provided, otherwise read from cache
         completed:
           vars.completed ??
           client.readFragment<{ completed: boolean }>({
@@ -169,10 +181,12 @@ function Tasks() {
       },
     }),
 
-    // optional: not strictly needed, Apollo merges mutation result automatically
+    // update: not strictly needed, Apollo merges mutation result automatically
     update(cache, { data }) {
+      // This callback is called after the mutation completes
       const t = data?.updateTask;
       if (!t) return;
+      // Write the updated task data to the Apollo cache
       cache.writeFragment({
         id: cache.identify({ __typename: 'Task', id: t.id }),
         fragment: gql`
@@ -200,10 +214,15 @@ function Tasks() {
   });
   */
 
+
+  // useMutation for deleting a task
+  // - update: after server responds, removes the task from Apollo cache
   const [delTask, mDelete] = useMutation<DeleteTaskData, DeleteTaskVars>(DELETE, {
     update(cache, { data }) {
+      // This callback is called after the mutation completes
       const deleted = data?.deleteTask;
       if (!deleted) return;
+      // Remove the deleted task from the Apollo cache
       cache.modify({
         fields: {
           tasks(
@@ -211,21 +230,28 @@ function Tasks() {
             { readField },
           ): ReadonlyArray<Reference> {
             const existing = asArray(existingIn);
+            // Filter out the deleted task by id
             return existing.filter((r) => readField('id', r) !== deleted.id);
           },
         },
       });
+      // Evict the deleted task from the cache and run garbage collection
       cache.evict({ id: cache.identify(deleted) });
       cache.gc();
     },
   });
 
+
   // --- Subscriptions keep everyone in sync ---
+
+  // Listen for new tasks added by other clients
   useSubscription(TASK_ADDED, {
     onData: ({ client, data }) => {
+      // This callback is called when a new task is added (via subscription)
       const t = data.data?.taskAdded;
       if (!t) return;
 
+      // Add the new task to the Apollo cache
       client.cache.modify({
         fields: {
           tasks(
@@ -235,7 +261,9 @@ function Tasks() {
             const existing = asArray(existingIn);
             const ref = toReference({ __typename: 'Task', id: t.id }) as Reference | undefined;
             if (!ref) return existing;
+            // Avoid duplicates
             if (existing.some((r) => readField('id', r) === t.id)) return existing;
+            // Add new task to the beginning of the list
             return [ref, ...existing];
           },
         },
@@ -243,11 +271,14 @@ function Tasks() {
     },
   });
 
+  // Listen for task updates from other clients
   useSubscription(TASK_UPDATED, {
     onData: ({ client, data }) => {
+      // This callback is called when a task is updated (via subscription)
       const t = data.data?.taskUpdated;
       if (!t) return;
 
+      // Write the updated task data to the Apollo cache
       client.cache.writeFragment({
         id: client.cache.identify({ __typename: 'Task', id: t.id }),
         fragment: gql`
@@ -262,11 +293,14 @@ function Tasks() {
     },
   });
 
+  // Listen for task deletions from other clients
   useSubscription(TASK_DELETED, {
     onData: ({ client, data }) => {
+      // This callback is called when a task is deleted (via subscription)
       const t = data.data?.taskDeleted;
       if (!t) return;
 
+      // Remove the deleted task from the Apollo cache
       client.cache.modify({
         fields: {
           tasks(
@@ -274,10 +308,12 @@ function Tasks() {
             { readField },
           ): ReadonlyArray<Reference> {
             const existing = asArray(existingIn);
+            // Filter out the deleted task by id
             return existing.filter((r) => readField('id', r) !== t.id);
           },
         },
       });
+      // Evict the deleted task from the cache and run garbage collection
       client.cache.evict({ id: client.cache.identify(t) });
       client.cache.gc();
     },
@@ -285,10 +321,15 @@ function Tasks() {
 
   // ------------------------------------------
 
+
+  // State for the new task title input
   const [title, setTitle] = useState('');
 
+
+  // Show loading or error states
   if (loading) return <p>Loading…</p>;
   if (error) return <pre style={{ color: 'red' }}>Query error: {error.message}</pre>;
+
 
   return (
     <div style={{ maxWidth: 560, margin: '40px auto', fontFamily: 'system-ui' }}>
@@ -297,12 +338,14 @@ function Tasks() {
       <div style={{ display: 'flex', gap: 8 }}>
         <input
           value={title}
+          // Update the title state as the user types
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Task title"
           style={{ flex: 1, padding: 8 }}
         />
         <button
           disabled={!title || mCreate.loading}
+          // When clicked, create a new task and clear the input
           onClick={() => {
             createTask({ variables: { t: title } });
             setTitle('');
@@ -320,6 +363,7 @@ function Tasks() {
             </span>
             <button
               aria-label="Delete task"
+              // When clicked, delete the task (with optimistic UI)
               onClick={() =>
                 delTask({
                   variables: { id: t.id },
@@ -335,6 +379,7 @@ function Tasks() {
 
             <button
               aria-label="Toggle complete"
+              // When clicked, toggle the completed state of the task
               onClick={() =>
                 updateTask({
                   variables: { id: t.id, completed: !t.completed }, // <-- pass id!
@@ -348,6 +393,7 @@ function Tasks() {
 
             <button
               aria-label="Rename"
+              // When clicked, prompt for a new title and update the task if changed
               onClick={() => {
                 const newTitle = prompt('New title', t.title);
                 if (newTitle && newTitle !== t.title) {
