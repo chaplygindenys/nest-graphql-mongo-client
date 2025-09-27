@@ -6,5 +6,14 @@ export type TaskGQL = {
   completed: boolean;  // non-null
   createdAt?: number;  // timestamp in ms, optional
   updatedAt?: number;  // timestamp in ms, optional
+  userId?: string;     // if you expose it
+
 };
 
+export type UserGQL = {
+  __typename?: 'User';
+  id: string;
+  email: string;
+  name?: string | null;
+  avatarUrl?: string | null;
+};

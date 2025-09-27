@@ -22,7 +22,7 @@ export function SignIn() {
           cursor: 'pointer',
         }}
       >
-        Sign in with Google
+        Sign in with Github
       </button>
     </div>
   );
