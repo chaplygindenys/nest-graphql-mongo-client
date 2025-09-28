@@ -1,6 +1,8 @@
 // src/SignIn.tsx
 export function SignIn() {
   const authUrl = import.meta.env.VITE_AUTH_URL as string;
+  console.log('Auth URL:', authUrl);
+
   return (
     <div
       style={{

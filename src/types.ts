@@ -13,7 +13,7 @@ export type TaskGQL = {
 export type UserGQL = {
   __typename?: 'User';
   id: string;
-  email: string;
+  githubId?: string | null;
   name?: string | null;
   avatarUrl?: string | null;
 };
