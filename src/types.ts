@@ -14,6 +14,5 @@ export type UserGQL = {
   id: string;
   githubId?: string | null;
   name?: string | null;
-
   avatarUrl?: string | null;
 };
