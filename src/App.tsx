@@ -10,7 +10,6 @@ export default function App() {
       <AuthGate>
         <div style={{ maxWidth: 560, margin: '40px auto', fontFamily: 'system-ui' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h1>Nest + GraphQL + Mongo (Demo)</h1>
             <LogoutButton />
           </div>
           <Tasks />
