@@ -238,7 +238,7 @@ function Tasks() {
 
   // --- Subscriptions keep everyone in sync ---
 
-  const data1 = useSubscription(TASK_ADDED, {
+  const adddTAskSubData = useSubscription(TASK_ADDED, {
     onSubscriptionData: ({ subscriptionData }) => {
       console.log('[CLIENT] TASK_ADDED data:', subscriptionData?.data);
     },
@@ -271,10 +271,15 @@ function Tasks() {
     },
   });
 
-  console.log('[CLIENT] TASK_ADDED hook mounted', data1);
+  console.log('[CLIENT] TASK_ADDED hook mounted', adddTAskSubData);
 
   // Listen for task updates from other clients
-  useSubscription(TASK_UPDATED, {
+  const updateTaskSubData = useSubscription(TASK_UPDATED, {
+    onSubscriptionData: ({ subscriptionData }) => {
+      console.log('[CLIENT] TASK_UPDATED data:', subscriptionData?.data);
+    },
+    onError: (e) => console.error('[CLIENT] TASK_UPDATED error:', e),
+
     onData: ({ client, data }) => {
       console.log('Subscription data _update:', data);
       // This callback is called when a task is updated (via subscription)
@@ -296,8 +301,15 @@ function Tasks() {
     },
   });
 
+  console.log('[CLIENT] TASK_UPDATED hook mounted', updateTaskSubData);
+
   // Listen for task deletions from other clients
-  useSubscription(TASK_DELETED, {
+  const deleteTaskSubData = useSubscription(TASK_DELETED, {
+    onSubscriptionData: ({ subscriptionData }) => {
+      console.log('[CLIENT] TASK_DELETE data:', subscriptionData?.data);
+    },
+    onError: (e) => console.error('[CLIENT] TASK_DELETE error:', e),
+
     onData: ({ client, data }) => {
       console.log('Subscription data _delete:', data);
       // This callback is called when a task is deleted (via subscription)
@@ -322,6 +334,7 @@ function Tasks() {
       client.cache.gc();
     },
   });
+  console.log('[CLIENT] TASK_DELETE hook mounted', deleteTaskSubData);
 
   // ------------------------------------------
 
