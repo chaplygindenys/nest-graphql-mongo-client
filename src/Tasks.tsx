@@ -1,10 +1,11 @@
-import { gql, useMutation, useQuery, useSubscription, type Reference } from '@apollo/client';
+/**import { gql, useMutation, useQuery, useSubscription, type Reference } from '@apollo/client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { TaskGQL } from './types';
 
 // add this import
 import { useApolloClient } from '@apollo/client';
+import { auth } from './auth';
 
 const TASKS = gql`
   query Tasks {
@@ -78,10 +79,6 @@ const TASK_DELETED = gql`
   }
 `;
 
-// Query types
-type TasksQuery = { tasks: TaskGQL[] };
-type TasksVars = {};
-
 // Mutation types
 type CreateTaskData = { createTask: TaskGQL };
 type CreateTaskVars = { t: string };
@@ -93,9 +90,26 @@ type DeleteTaskData = { deleteTask: Pick<TaskGQL, 'id' | '__typename'> };
 type DeleteTaskVars = { id: string };
 
 function Tasks() {
-  // Fetches the list of tasks from the server using Apollo useQuery hook
-  const { data, loading, error } = useQuery<TasksQuery, TasksVars>(TASKS);
+  const token = auth.getToken();
+  console.log('[CLIENT] Tasks token:', token);
 
+  // Fetches the list of tasks from the server using Apollo useQuery hook
+  const { data, loading, error, refetch } = useQuery(TASKS, {
+    // don’t call the API until we have a token
+    skip: !token,
+    // get fresh data from the server, but keep any cached data visible
+    fetchPolicy: 'cache-and-network',
+    // if you prefer to always hit the server: fetchPolicy: 'network-only'
+  });
+
+  console.log('[CLIENT] Tasks query data:', { data, loading, error });
+
+  // Optional: refetch when the tab regains focus
+  useEffect(() => {
+    const onFocus = () => refetch();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refetch]);
   const apollo = useApolloClient();
 
   // Helper to ensure the value is always an array of Reference
@@ -197,18 +211,7 @@ function Tasks() {
     },
   });
 
-  /**
-  const [updateTask, mUpdate] = useMutation(UPDATE, {
-    optimisticResponse: (vars) => ({
-      updateTask: {
-        __typename: 'Task',
-        id: vars.id, // <-- keep the same id
-        title: vars.title ?? undefined, // or read from cache if needed
-        completed: vars.completed ?? undefined,
-      },
-    }),
-  });
-  */
+
 
   // useMutation for deleting a task
   // - update: after server responds, removes the task from Apollo cache
@@ -429,3 +432,365 @@ function Tasks() {
 }
 
 export { Tasks };
+
+*/
+
+import {
+  gql,
+  useApolloClient,
+  useMutation,
+  useQuery,
+  useSubscription,
+  type Reference,
+} from '@apollo/client';
+import { useEffect, useState } from 'react';
+import { auth } from './auth';
+import type { TaskGQL } from './types';
+
+/* ===================== GQL ===================== */
+
+const TASKS = gql`
+  query Tasks {
+    tasks {
+      id
+      title
+      completed
+      __typename
+    }
+  }
+`;
+
+const CREATE = gql`
+  mutation CreateTask($t: String!) {
+    createTask(input: { title: $t }) {
+      id
+      title
+      completed
+      __typename
+    }
+  }
+`;
+
+const UPDATE = gql`
+  mutation UpdateTask($id: ID!, $title: String, $completed: Boolean) {
+    updateTask(input: { id: $id, title: $title, completed: $completed }) {
+      id
+      title
+      completed
+      __typename
+    }
+  }
+`;
+
+const DELETE = gql`
+  mutation DeleteTask($id: ID!) {
+    deleteTask(id: $id) {
+      id
+      __typename
+    }
+  }
+`;
+
+const TASK_ADDED = gql`
+  subscription TaskAdded {
+    taskAdded {
+      id
+      title
+      completed
+      __typename
+    }
+  }
+`;
+const TASK_UPDATED = gql`
+  subscription TaskUpdated {
+    taskUpdated {
+      id
+      title
+      completed
+      __typename
+    }
+  }
+`;
+const TASK_DELETED = gql`
+  subscription TaskDeleted {
+    taskDeleted {
+      id
+      __typename
+    }
+  }
+`;
+
+/* ===================== Component ===================== */
+
+export function Tasks() {
+  const token = auth.getToken();
+  const apollo = useApolloClient();
+  const [title, setTitle] = useState('');
+
+  // 1) Initial list
+  const { data, loading, error, refetch } = useQuery<{ tasks: TaskGQL[] }>(TASKS, {
+    skip: !token, // <— don’t call until we have JWT
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+  });
+
+  console.log('[CLIENT] Tasks query data:', { data, loading, error });
+
+  // Optional: refetch on tab focus
+  useEffect(() => {
+    const onFocus = () => token && refetch();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [token, refetch]);
+
+  // Small helper
+  const asArray = (v: Reference | ReadonlyArray<Reference> | undefined) =>
+    (Array.isArray(v) ? v : v ? [v] : []) as ReadonlyArray<Reference>;
+
+  /* ----------------- Mutations ----------------- */
+
+  const [createTask, mCreate] = useMutation<{ createTask: TaskGQL }, { t: string }>(CREATE, {
+    optimisticResponse: (vars) => ({
+      createTask: {
+        __typename: 'Task',
+        id: `temp:${crypto.randomUUID()}`,
+        title: vars.t,
+        completed: false,
+      },
+    }),
+    update(cache, { data }) {
+      const created = data?.createTask;
+      if (!created) return;
+      cache.modify({
+        fields: {
+          tasks(
+            existingIn: Reference | ReadonlyArray<Reference> | undefined,
+            { readField, toReference },
+          ) {
+            const existing = asArray(existingIn);
+            const newRef = toReference({ __typename: 'Task', id: created.id }) as
+              | Reference
+              | undefined;
+            if (!newRef) return existing;
+            if (existing.some((r) => readField('id', r) === created.id)) return existing;
+            return [newRef, ...existing];
+          },
+        },
+      });
+    },
+  });
+
+  const [updateTask, mUpdate] = useMutation<
+    { updateTask: TaskGQL },
+    { id: string; title?: string | null; completed?: boolean | null }
+  >(UPDATE, {
+    optimisticResponse: (vars) => {
+      // read previous fields so we don’t flash empty ones
+      const cacheId = apollo.cache.identify({ __typename: 'Task', id: vars.id });
+      const prev = apollo.readFragment<{ title: string; completed: boolean }>({
+        id: cacheId,
+        fragment: gql`
+          fragment Prev on Task {
+            title
+            completed
+          }
+        `,
+      });
+      return {
+        updateTask: {
+          __typename: 'Task',
+          id: vars.id,
+          title: vars.title ?? prev?.title ?? '',
+          completed: vars.completed ?? prev?.completed ?? false,
+        },
+      };
+    },
+    update(cache, { data }) {
+      const t = data?.updateTask;
+      if (!t) return;
+      cache.writeFragment({
+        id: cache.identify({ __typename: 'Task', id: t.id }),
+        fragment: gql`
+          fragment TaskUpdated on Task {
+            id
+            title
+            completed
+          }
+        `,
+        data: t,
+      });
+    },
+  });
+
+  const [delTask, mDelete] = useMutation<
+    { deleteTask: Pick<TaskGQL, 'id' | '__typename'> },
+    { id: string }
+  >(DELETE, {
+    update(cache, { data }) {
+      const deleted = data?.deleteTask;
+      if (!deleted) return;
+      cache.modify({
+        fields: {
+          tasks(existingIn: Reference | ReadonlyArray<Reference> | undefined, { readField }) {
+            const existing = asArray(existingIn);
+            return existing.filter((r) => readField('id', r) !== deleted.id);
+          },
+        },
+      });
+      cache.evict({ id: cache.identify(deleted) });
+      cache.gc();
+    },
+  });
+
+  /* ----------------- Subscriptions ----------------- */
+  // IMPORTANT: skip when there’s no token yet to avoid “Forbidden resource”
+  const skipSubs = !token;
+
+  useSubscription(TASK_ADDED, {
+    skip: skipSubs,
+    onError: (e) => console.error('[CLIENT] TASK_ADDED error:', e),
+    onData: ({ client, data }) => {
+      // console.log('[CLIENT] TASK_ADDED data:', data?.data);
+      const t = data.data?.taskAdded;
+      if (!t) return;
+      client.cache.modify({
+        fields: {
+          tasks(
+            existingIn: Reference | ReadonlyArray<Reference> | undefined,
+            { readField, toReference },
+          ) {
+            const existing = asArray(existingIn);
+            const ref = toReference({ __typename: 'Task', id: t.id }) as Reference | undefined;
+            if (!ref) return existing;
+            if (existing.some((r) => readField('id', r) === t.id)) return existing;
+            return [ref, ...existing];
+          },
+        },
+      });
+    },
+  });
+
+  useSubscription(TASK_UPDATED, {
+    skip: skipSubs,
+    onError: (e) => console.error('[CLIENT] TASK_UPDATED error:', e),
+    onData: ({ client, data }) => {
+      // console.log('[CLIENT] TASK_UPDATED data:', data?.data);
+      const t = data.data?.taskUpdated;
+      if (!t) return;
+      client.cache.writeFragment({
+        id: client.cache.identify({ __typename: 'Task', id: t.id }),
+        fragment: gql`
+          fragment TaskUpdatedFields on Task {
+            id
+            title
+            completed
+          }
+        `,
+        data: t,
+      });
+    },
+  });
+
+  useSubscription(TASK_DELETED, {
+    skip: skipSubs,
+    onError: (e) => console.error('[CLIENT] TASK_DELETED error:', e),
+    onData: ({ client, data }) => {
+      const t = data.data?.taskDeleted;
+      if (!t) return;
+      client.cache.modify({
+        fields: {
+          tasks(existingIn: Reference | ReadonlyArray<Reference> | undefined, { readField }) {
+            const existing = asArray(existingIn);
+            return existing.filter((r) => readField('id', r) !== t.id);
+          },
+        },
+      });
+      client.cache.evict({ id: client.cache.identify(t) });
+      client.cache.gc();
+    },
+  });
+
+  /* ----------------- UI ----------------- */
+
+  if (!token) return <p>Sign in to see tasks.</p>;
+  if (loading && !data) return <p>Loading…</p>;
+  if (error) return <pre style={{ color: 'red' }}>Query error: {error.message}</pre>;
+
+  return (
+    <div style={{ maxWidth: 560, margin: '40px auto', fontFamily: 'system-ui' }}>
+      <h1>Nest + GraphQL + Mongo (Demo)</h1>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Task title"
+          style={{ flex: 1, padding: 8 }}
+        />
+        <button
+          disabled={!title || mCreate.loading}
+          onClick={() => {
+            createTask({ variables: { t: title } });
+            setTitle('');
+          }}
+        >
+          {mCreate.loading ? 'Creating…' : 'Add'}
+        </button>
+      </div>
+
+      <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
+        {(data?.tasks ?? []).map((t) => (
+          <li key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ flex: 1 }}>
+              {t.title} {t.completed ? '✅' : ' '}
+            </span>
+
+            <button
+              aria-label="Delete task"
+              onClick={() =>
+                delTask({
+                  variables: { id: t.id },
+                  optimisticResponse: { deleteTask: { id: t.id, __typename: 'Task' } },
+                }).catch((e) => console.error('deleteTask error:', e))
+              }
+              disabled={mDelete.loading}
+              style={{ border: 'none', background: '#eee', padding: '2px 6px', cursor: 'pointer' }}
+              title="Delete"
+            >
+              ×
+            </button>
+
+            <button
+              aria-label="Toggle complete"
+              onClick={() =>
+                updateTask({
+                  variables: { id: t.id, completed: !t.completed },
+                }).catch((e) => console.error('updateTask error:', e))
+              }
+              disabled={mUpdate.loading}
+              title="Toggle complete"
+            >
+              {t.completed ? '❌' : '✅'}
+            </button>
+
+            <button
+              aria-label="Rename"
+              onClick={() => {
+                const newTitle = prompt('New title', t.title);
+                if (newTitle && newTitle !== t.title) {
+                  updateTask({ variables: { id: t.id, title: newTitle } }).catch((e) =>
+                    console.error('updateTask (title) error:', e),
+                  );
+                }
+              }}
+              disabled={mUpdate.loading}
+              title="Rename"
+            >
+              ✏️
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
