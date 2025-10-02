@@ -238,9 +238,15 @@ function Tasks() {
 
   // --- Subscriptions keep everyone in sync ---
 
-  // Listen for new tasks added by other clients
-  useSubscription(TASK_ADDED, {
+  const data1 = useSubscription(TASK_ADDED, {
+    onSubscriptionData: ({ subscriptionData }) => {
+      console.log('[CLIENT] TASK_ADDED data:', subscriptionData?.data);
+    },
+    onError: (e) => console.error('[CLIENT] TASK_ADDED error:', e),
+
     onData: ({ client, data }) => {
+      console.log('Subscription data _add:', data);
+
       // This callback is called when a new task is added (via subscription)
       const t = data.data?.taskAdded;
       if (!t) return;
@@ -265,9 +271,12 @@ function Tasks() {
     },
   });
 
+  console.log('[CLIENT] TASK_ADDED hook mounted', data1);
+
   // Listen for task updates from other clients
   useSubscription(TASK_UPDATED, {
     onData: ({ client, data }) => {
+      console.log('Subscription data _update:', data);
       // This callback is called when a task is updated (via subscription)
       const t = data.data?.taskUpdated;
       if (!t) return;
@@ -290,6 +299,7 @@ function Tasks() {
   // Listen for task deletions from other clients
   useSubscription(TASK_DELETED, {
     onData: ({ client, data }) => {
+      console.log('Subscription data _delete:', data);
       // This callback is called when a task is deleted (via subscription)
       const t = data.data?.taskDeleted;
       if (!t) return;
